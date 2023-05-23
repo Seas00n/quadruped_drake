@@ -1,6 +1,6 @@
 import numpy as np
 from pydrake.all import *
-
+#继承LeafSystem
 class BasicTrunkPlanner(LeafSystem):
     """
     Implements the simplest possible trunk-model planner, which generates
@@ -12,9 +12,11 @@ class BasicTrunkPlanner(LeafSystem):
 
         # Dictionary of geometry frame ids {"trunk": trunk_frame_id, "lf": lf_foot_frame_id, ...}
         self.frame_ids = frame_ids
-
+        # basic planner 只有两个输出端口，“trunk trajectory”和“trunk geometry”
         # We'll use an abstract output port so we can send all the
         # data we'd like to include in a dictionary format
+        # 跟随simulator advance 调用SetTrunkOutputs
+        # 按照字典的格式设置状态轨迹
         self.DeclareAbstractOutputPort(
                 "trunk_trajectory",
                 lambda: AbstractValue.Make({}),
@@ -25,7 +27,7 @@ class BasicTrunkPlanner(LeafSystem):
         fpv = FramePoseVector()
         for frame in self.frame_ids:
             fpv.set_value(frame_ids[frame], RigidTransform())
-
+        
         self.DeclareAbstractOutputPort(
                 "trunk_geometry",
                 lambda: AbstractValue.Make(fpv),
