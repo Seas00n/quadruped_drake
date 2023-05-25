@@ -7,24 +7,26 @@ from lcm_types.trunklcm import trunk_state_t
 
 import time
 
+
 class TowrTrunkPlanner(BasicTrunkPlanner):
     """
     Trunk planner which uses TOWR (https://github.com/ethz-adrl/towr/) to generate
     target motions of the base and feet. 
     """
+
     def __init__(self, trunk_geometry_frame_id):
         BasicTrunkPlanner.__init__(self, trunk_geometry_frame_id)
 
         # Set up LCM subscriber to read optimal trajectory from TOWR
         self.lc = lcm.LCM()
         subscription = self.lc.subscribe("trunk_state", self.lcm_handler)
-        subscription.set_queue_capacity(0)   # disable the queue limit, since we'll process many messages from TOWR
+        subscription.set_queue_capacity(0)  # disable the queue limit, since we'll process many messages from TOWR
 
         # Set up storage of optimal trajectory
         self.traj_finished = False
         self.towr_timestamps = []
         self.towr_data = []
-       
+
         # Call TOWR to generate a nominal trunk trajectory
         self.GenerateTrunkTrajectory()
 
@@ -40,12 +42,12 @@ class TowrTrunkPlanner(BasicTrunkPlanner):
         to self.towr_data and self.timestamps. 
         """
         msg = trunk_state_t.decode(data)
-       
+
         self.towr_timestamps.append(msg.timestamp)
         self.towr_data.append(msg)
-        
-        self.traj_finished = msg.finished   # indicate when the trajectory is over so 
-                                            # we can stop listening to LCM
+
+        self.traj_finished = msg.finished  # indicate when the trajectory is over so
+        # we can stop listening to LCM
 
     def GenerateTrunkTrajectory(self):
         """
@@ -55,17 +57,17 @@ class TowrTrunkPlanner(BasicTrunkPlanner):
         # Run the trajectory optimization (TOWR)
         # syntax is trunk_mpc gait_type={walk,trot,pace,bound,gallop} optimize_gait={0,1} distance_x distance_y
         my_env = os.environ
-        my_env["LD_LIBRARY_PATH"] = ""   # need to set this so only the custom version of towr gets used, not
-                                         # the one in catkin_ws (if it exits)
-        sub.Popen(["build/towr/trunk_mpc","walk","0","1.5", "0.0"], env=my_env)  
+        my_env["LD_LIBRARY_PATH"] = ""  # need to set this so only the custom version of towr gets used, not
+        # the one in catkin_ws (if it exits)
+        sub.Popen(["build/towr/trunk_mpc", "gallop", "1", "1.5", "0.0"], env=my_env)
 
         # Read the result over LCM
         self.traj_finished = False  # clear out any stored data
-        self.towr_timestamps = []        # from previous trunk trajectories
+        self.towr_timestamps = []  # from previous trunk trajectories
         self.towr_data = []
 
         while not self.traj_finished:
-            self.lc.handle() 
+            self.lc.handle()
 
     def ComputeMaxControlInputs(self):
         """
@@ -78,13 +80,13 @@ class TowrTrunkPlanner(BasicTrunkPlanner):
         u2_max = 0
         for data in self.towr_data:
             u2_i = np.linalg.norm(
-                        np.hstack([data.lf_pdd,
-                              data.rf_pdd,
-                              data.lh_pdd,
-                              data.rh_pdd,
-                              data.base_rpydd,
-                              data.base_pdd])
-                        )
+                np.hstack([data.lf_pdd,
+                           data.rf_pdd,
+                           data.lh_pdd,
+                           data.rh_pdd,
+                           data.base_rpydd,
+                           data.base_pdd])
+            )
             if u2_i > u2_max:
                 u2_max = u2_i
         return u2_max
@@ -101,7 +103,7 @@ class TowrTrunkPlanner(BasicTrunkPlanner):
             # Find the timestamp in the (stored) TOWR trajectory that is closest 
             # to the curren time
             t -= self.wait_time
-            closest_index = np.abs(np.array(self.towr_timestamps)-t).argmin()
+            closest_index = np.abs(np.array(self.towr_timestamps) - t).argmin()
             closest_towr_t = self.towr_timestamps[closest_index]
             data = self.towr_data[closest_index]
 
@@ -119,7 +121,7 @@ class TowrTrunkPlanner(BasicTrunkPlanner):
             self.output_dict["pd_rf"] = np.array(data.rf_pd)
             self.output_dict["pd_lh"] = np.array(data.lh_pd)
             self.output_dict["pd_rh"] = np.array(data.rh_pd)
-            
+
             # Foot accelerations
             self.output_dict["pdd_lf"] = np.array(data.lf_pdd)
             self.output_dict["pdd_rf"] = np.array(data.rf_pdd)
@@ -130,7 +132,8 @@ class TowrTrunkPlanner(BasicTrunkPlanner):
             self.output_dict["contact_states"] = [data.lf_contact, data.rf_contact, data.lh_contact, data.rh_contact]
 
             # Foot contact forces, where each row corresponds to a foot [lf,rf,lh,rh].
-            self.output_dict["f_cj"] = np.vstack([np.array(data.lf_f), np.array(data.rf_f), np.array(data.lh_f), np.array(data.rh_f)]).T
+            self.output_dict["f_cj"] = np.vstack(
+                [np.array(data.lf_f), np.array(data.rf_f), np.array(data.lh_f), np.array(data.rh_f)]).T
 
             # Body pose
             self.output_dict["rpy_body"] = np.array(data.base_rpy)
@@ -145,5 +148,4 @@ class TowrTrunkPlanner(BasicTrunkPlanner):
             self.output_dict["pdd_body"] = np.array(data.base_pdd)
 
             # Maximum control input (accelerations) magnitude across the trajectory
-            self.output_dict["u2_max"] = self.u2_max 
-
+            self.output_dict["u2_max"] = self.u2_max
