@@ -12,10 +12,8 @@
 #include <lcm/lcm-cpp.hpp>
 #include "../lcm_types/trunklcm/trunk_state_t.hpp"
 
-
 using namespace towr;
 
-// Publish the trajectory contained in the given solution over lcm
 void publish_trunk_state(SplineHolder solution, double t, bool finished=false) {
     
     lcm::LCM lcm;
@@ -67,18 +65,37 @@ void publish_trunk_state(SplineHolder solution, double t, bool finished=false) {
     lcm.publish("trunk_state", &state);
 }
 
-// Generate a trunk-model trajectory for a quadruped using TOWR, and send the results
-// over LCM, where they can be read by Drake. 
-int main(int argc, char *argv[]) {
 
-    // Command line argument parsing
-    char usage_message[] = "Usage: trunk_mpc gait_type={walk,trot,pace,bound,gallop} optimize_gait={0,1} distance_x distance_y";
-    if (argc != 5) {
-        std::cout << usage_message << std::endl;
-        return 1;
-    }
-    
-    int gait_type; 
+class Obstacle_Block:public HeightMap{
+    private:
+        double block_start = 0.3;
+        double length_ = 0.15;
+        double height_ = 0.12;
+        double eps_ = 0.03;
+        const double slope_ = height_/eps_;
+    public:
+        double GetHeight(double x, double y) const{
+            double h = 0.0;
+            if(block_start<=x && x<=block_start+eps_){
+                h = slope_*(x-block_start);
+            }
+            if (block_start+eps_ <= x && x <= block_start+length_){
+                h = height_;
+            }
+            return h;
+        }
+        double GetHeightDerivWrtX(double x, double y) const{
+            double dhdx = 0.0;
+            // very steep ramp leading up to block
+            if (block_start <= x && x <=block_start+eps_)
+                dhdx = slope_;
+            return dhdx;
+        }
+};
+
+int main(int argc, char* argv[]){
+    char usage_message[] = "";
+    int gait_type;
     if (!strcmp(argv[1],"walk")) {
         gait_type = 0;
     } else if (!strcmp(argv[1],"trot")) {
@@ -100,51 +117,43 @@ int main(int argc, char *argv[]) {
     float dist_x = std::stof(argv[3]);
     float dist_y = std::stof(argv[4]);
 
-    // Set up the NLP
     NlpFormulation formulation;
-    
-    // terrain
-    formulation.terrain_ = std::make_shared<FlatGround>(0.0);
-    
-    // Kinematic limits and dynamic parameters
+    formulation.terrain_ = std::make_shared<Obstacle_Block>();
     formulation.model_ = RobotModel(RobotModel::MiniCheetah);
-
-    // initial position
-    auto nominal_stance_B = formulation.model_.kinematic_model_->GetNominalStanceInBase(); 
-    double z_ground = 0.0;
+    
+    /*
+    初始的四足位置
+    (LF)(0.2,0.11,0)-----(RF)(0.2,-0.11,0)
+    |                                    |
+    |         （Base)(0,0,0.3)           |
+    |                                    |
+    |                                    |
+    (LH)(-0.2,0.11,0)----(RH)(-0.2,-0.11,0)
+    */
+    auto nominal_stance_B = formulation.model_.kinematic_model_->GetNominalStanceInBase();
+    double z_ground = 0;
     formulation.initial_ee_W_ = nominal_stance_B;
     std::for_each(formulation.initial_ee_W_.begin(), formulation.initial_ee_W_.end(),
-            [&](Eigen::Vector3d& p){ p.z() = z_ground; } // feet at 0 height
-    );
-    formulation.initial_base_.lin.at(kPos).z() = - nominal_stance_B.front().z() + z_ground;
+        [&](Eigen::Vector3d& p){p.z()=z_ground;});
+
+    formulation.initial_base_.lin.at(kPos).z() = -nominal_stance_B.front().z()+z_ground;
+    std::cout<<nominal_stance_B.front()<<std::endl;
+    formulation.final_base_.lin.at(towr::kPos)<<dist_x, dist_y, 0.2;
     
+    
+    
+    double totoal_duration = 4.0;
 
-    // desired goal state
-    formulation.final_base_.lin.at(towr::kPos) << dist_x, dist_y, 0.2;
-
-    // Total duration of the movement
-    double total_duration = 4.0;
-
-    // Parameters defining contact sequence and default durations. We use
-    // a GaitGenerator with some predifined gaits
-    auto gait_gen_ = GaitGenerator::MakeGaitGenerator(4);
+    auto gait_gen_= GaitGenerator::MakeGaitGenerator(4);
     auto id_gait   = static_cast<GaitGenerator::Combos>(gait_type); // 0=walk, 1=flying trot, 2=pace, 3=bound, 4=gallop
     gait_gen_->SetCombo(id_gait);
     for (int ee=0; ee<4; ++ee) {
-        formulation.params_.ee_phase_durations_.push_back(gait_gen_->GetPhaseDurations(total_duration, ee));
+        formulation.params_.ee_phase_durations_.push_back(gait_gen_->GetPhaseDurations(totoal_duration, ee));
         formulation.params_.ee_in_contact_at_start_.push_back(gait_gen_->IsInContactAtStart(ee));
     }
-
-    // Indicate whether to optimize over gaits as well
     if (optimize_gait) {
         formulation.params_.OptimizePhaseDurations();
     }
-
-    // Add weighted cost on rotational velocity of base
-    //formulation.params_.costs_.push_back({Parameters::CostName(1),1.0});
-
-    // Initialize the nonlinear-programming problem with the variables,
-    // constraints and costs.
     ifopt::Problem nlp;
     SplineHolder solution;
     for (auto c : formulation.GetVariableSets(solution))
@@ -153,24 +162,20 @@ int main(int argc, char *argv[]) {
         nlp.AddConstraintSet(c);
     for (auto c : formulation.GetCosts())
         nlp.AddCostSet(c);
-
-    // Choose ifopt solver (IPOPT or SNOPT), set some parameters and solve.
-    // solver->SetOption("derivative_test", "first-order");
-    auto solver = std::make_shared<ifopt::IpoptSolver>();
-    solver->SetOption("jacobian_approximation", "exact"); // "finite difference-values"
-    solver->SetOption("max_cpu_time", 50.0);
-    solver->Solve(nlp);
     
-    // Send solution over LCM
+    auto solver = std::make_shared<ifopt::IpoptSolver>();
+    solver->SetOption("jacobian_approximation","exact");
+    solver->SetOption("derivative_test","none");
+    solver->SetOption("max_cpu_time",50.0);
+    solver->Solve(nlp);
+
     lcm::LCM lcm;
     trunklcm::trunk_state_t state;
 
-    double dt = 1e-3;
-    for (double t=0; t<total_duration; t=t+dt) {
+    double dt = 0.01;
+    for(double t=0; t<totoal_duration; t=t+dt){
         publish_trunk_state(solution, t);
+        std::cout<<state.base_p<<std::endl;
     }
-
-    // send one final message including the finished flag
-    publish_trunk_state(solution, total_duration, true);
+    publish_trunk_state(solution, totoal_duration, true);
 }
-

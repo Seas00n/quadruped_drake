@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 show_trunk_model = True
 use_lcm = False
 
-planning_method = "towr"  # "towr" or "basic"
+planning_method = "basic"  # "towr" or "basic"
 control_method = "MPTC"  # ID = Inverse Dynamics (standard QP),
 # B = Basic (simple joint-space PD),
 # MPTC = task-space passivity
@@ -39,6 +39,8 @@ scene_graph = builder.AddSystem(SceneGraph())
 plant = builder.AddSystem(MultibodyPlant(time_step=dt))
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 quad = Parser(plant=plant).AddModelFromFile(robot_urdf, "quad")
+quad_frame = plant.GetFrameByName("body")
+
 
 # Add a flat ground with friction
 X_BG = RigidTransform()

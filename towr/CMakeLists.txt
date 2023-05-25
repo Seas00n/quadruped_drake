@@ -86,6 +86,13 @@ target_link_libraries(trunk_mpc
     ifopt::ifopt_ipopt
     lcm)
 
+add_executable(trunk_obstacle trunk_obstacle.cpp)
+target_link_libraries(trunk_obstacle
+  PRIVATE
+  ${PROJECT_NAME}
+  ifopt::ifopt_ipopt
+  lcm
+)
 #############
 ## Testing ##
 #############
