@@ -48,11 +48,12 @@ class LegSineTrunkPlanner(LeafSystem):
             fpv.set_value(self.frame_ids[foot], X_foot)
 
     def SetSine(self, t):
-        T = 5e-3*200
+        T = 5e-3*400
         w = 2 * np.pi / T
-        circle_p = [0.1 * np.sin(w * t), 0.1 * np.cos(w * t), 0]
-        circle_pd = [0.1 * w * np.cos(w * t), -0.1 * w * np.sin(w * t), 0]
-        circle_pdd = [-0.1 * w * w * np.sin(w * t), -0.1 * w * w * np.cos(w * t), 0]
+        amp = 0.0
+        circle_p = [amp * np.sin(w * t), amp * np.sin(w * t), 0]
+        circle_pd = [amp * w * np.cos(w * t), amp * w * np.cos(w * t), 0]
+        circle_pdd = [-amp * w * w * np.sin(w * t), -amp * w * w * np.sin(w * t), 0]
         # Foot positions
         self.output_dict["p_lf"] = np.array(circle_p) + np.array([0.2, 0.11, 1.2])
         self.output_dict["p_rf"] = np.array(circle_p) + np.array([0.2, -0.11, 1.2])

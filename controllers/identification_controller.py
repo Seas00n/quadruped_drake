@@ -19,6 +19,7 @@ class IdentificationController(LeafSystem):
     Includes some basic dynamics computations, so other
     more complex controllers can inherit from this class.
     """
+    plant: MultibodyPlant
 
     def __init__(self, plant, dt, use_lcm=False):
         LeafSystem.__init__(self)
@@ -46,10 +47,14 @@ class IdentificationController(LeafSystem):
         self.err = 0
         self.res = 0
         self.Vdot = 0
+        self.p_feet_desired = np.zeros(self.plant.num_positions())
+        self.pd_feet_desired = np.zeros(self.plant.num_velocities())
+        self.p_feet_actual = np.zeros(self.plant.num_positions())
+        self.pd_feet_actual = np.zeros(self.plant.num_velocities())
         # 数据存储输出
         self.DeclareVectorOutputPort(
             "output_metrics",
-            BasicVector(4),
+            BasicVector(self.plant.num_positions() + self.plant.num_velocities()),
             self.SetLoggingOutputs)
         # 规划轨迹输入
         self.DeclareAbstractInputPort(
@@ -289,7 +294,8 @@ class IdentificationController(LeafSystem):
             pd_tilde'*pd_tilde.
 
         """
-        output.SetFromVector(np.asarray([self.V, self.err, self.res, self.Vdot]))
+        # output.SetFromVector(np.asarray([self.V, self.err, self.res, self.Vdot]))
+        output.SetFromVector(np.hstack((self.p_feet_desired, self.p_feet_actual)))
 
     def DoSetControlTorques(self, context, output):
         """
@@ -343,7 +349,6 @@ class IdentificationController(LeafSystem):
         print("p_lf planned from controller{}".format(trunk_data["p_lf"]))
         print("pd_lf planner from controller{}".format(trunk_data["pd_lf"]))
 
-
         self.lf_foot_frame = self.plant.GetFrameByName("LF_FOOT")  # left front
         self.rf_foot_frame = self.plant.GetFrameByName("RF_FOOT")  # right front
         self.lh_foot_frame = self.plant.GetFrameByName("LH_FOOT")  # left hind
@@ -352,28 +357,37 @@ class IdentificationController(LeafSystem):
         p_rf, J_rf, Jdv_rf = self.CalcFramePositionQuantities(self.rf_foot_frame)
         p_lh, J_lh, Jdv_lh = self.CalcFramePositionQuantities(self.lh_foot_frame)
         p_rh, J_rh, Jdv_rh = self.CalcFramePositionQuantities(self.rh_foot_frame)
-        p_feet_real = np.vstack([p_lf,p_rf,p_lh,p_rh]).reshape((12,))
+        p_feet_real = np.vstack([p_lf, p_rf, p_lh, p_rh]).reshape((12,))
         print("p_lf real from controller{}".format(p_lf.reshape((3,))))
 
+        q_err = p_feet_real - p_feet_nom  # 末端执行器位置误差
 
+        qd_err = self.plant.MapQDotToVelocity(self.context, v) - pd_feet_nom  # 末端执行器速度误差
+        # Nominal joint angles
+        T = 5e-3*400
+        w = 2*np.pi/T
+        amp = 0.5
+        t = context.get_time()
+        q_nom = np.ones(self.plant.num_positions())*amp*np.sin(w*t)
+        q_nom[1::3] = q_nom[1::3]-0.8
+        q_nom[2::3] = q_nom[2::3]+1.6
+        qd_nom = np.ones(self.plant.num_velocities())*amp*w*np.cos(w*t)
 
-        J_feet = np.array([J_lf, J_rf, J_lh, J_rh])
+        q_err = q-q_nom
+        qd_err = v-qd_nom
 
-        # 末端位置差转换为关节角度差
-        q_err = self.plant.MapQDotToVelocity(self.context,  p_feet_real - p_feet_nom)  # Need to use qd=N(q)*v here,
-        print("v in planner{}".format(v))
-
-
-        # 期望末端速度转换为关节速度
-        qd_err = v - self.plant.MapQDotToVelocity(self.context, pd_feet_nom)
+        self.p_feet_actual = q
+        self.pd_feet_actual = v
+        self.p_feet_desired = q_nom
+        self.pd_feet_desired = qd_nom
         # joint PD
-        Kp = 12 * np.eye(self.plant.num_velocities())
-        Kd =  0.7 * np.eye(self.plant.num_velocities())
+        Kp = 5 * np.eye(self.plant.num_positions())
+        Kd = 0.2* np.eye(self.plant.num_velocities())
         tau = - Kp @ q_err - Kd @ qd_err
 
         # Use actuation matrix to map generalized forces to control inputs
-        u = S @ tau
+        # u = S @ tau
+        u = tau
         u = np.clip(u, -150, 150)
         print("----------------------------------------------------")
         return u
-

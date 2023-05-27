@@ -26,12 +26,12 @@ control_method = "Identification"  # ID = Inverse Dynamics (standard QP),
 # CLF = control-lyapunov-function based
 # Identification = Joint PD for Identification
 
-sim_time = 10
+sim_time = 5
 dt = 5e-3
 target_realtime_rate = 1.0
 
 show_diagram = False
-make_plots = False
+make_plots = True
 
 #####################################################
 
@@ -147,7 +147,7 @@ builder.Connect(
     scene_graph.get_source_pose_port(plant.get_source_id()))
 builder.Connect(
     planner.GetOutputPort("trunk_geometry"),
-    scene_graph.get_source_pose_port(trunk_source))
+    scene_graph.get_source_pose_port(trunk_source))  # 发送planner可视化几何的位置和姿态
 
 # Connect the trunk-model planner to the controller
 if not control_method == "B":
@@ -195,10 +195,10 @@ plant_context = diagram.GetMutableSubsystemContext(plant, diagram_context)
 #                  0.0, -0.8, 1.6,
 #                  0.0, -0.8, 1.6,
 #                  0.0, -0.8, 1.6])
-q0 = np.asarray([0.2, 0.11, 1.2,
-                 0.2, -0.11, 1.2,
-                 -0.2, 0.11, 1.2,
-                 -0.2, -0.11, 1.2])
+q0 = np.asarray([0.0, -0.8, 1.6,
+                 0.0, -0.8, 1.6,
+                 0.0, -0.8, 1.6,
+                 0.0, -0.8, 1.6])
 qd0 = np.zeros(plant.num_velocities())
 plant.SetPositions(plant_context, q0)
 plant.SetVelocities(plant_context, qd0)
@@ -210,29 +210,27 @@ if make_plots:
     log = logger.FindLog(diagram_context)
 
     # Plot stuff
-    t = log.sample_times()[10:]
-    V = log.data()[0, 10:]
-    err = log.data()[1, 10:]
-    res = log.data()[2, 10:]
-    Vdot = log.data()[3, 10:]
-
+    t = log.sample_times()[1:]
+    p_feet_desired = log.data()[0, 1:]
+    pd_feet_desired = log.data()[12, 1:]
     plt.figure()
     # plt.subplot(4,1,1)
     # plt.plot(t, res, linewidth='2')
     # plt.ylabel("Residual")
 
     plt.subplot(3, 1, 1)
-    plt.plot(t, Vdot, linewidth='2')
+    plt.plot(t, p_feet_desired, linewidth='2')
+    plt.plot(t, pd_feet_desired, linewidth='2')
     plt.axhline(0, linestyle='dashed', color='grey')
-    plt.ylabel("$\dot{V}$")
+    plt.ylabel("$p_desired$")
 
-    plt.subplot(3, 1, 2)
-    plt.plot(t, V, linewidth='2')
-    plt.ylabel("$V$")
-
-    plt.subplot(3, 1, 3)
-    plt.plot(t, err, linewidth='2')
-    plt.ylabel("$\|y_1-y_2\|^2$")
-    plt.xlabel("time (s)")
+    # plt.subplot(3, 1, 2)
+    # plt.plot(t, pd_feet_desired, linewidth='2')
+    # plt.ylabel("$pd_desired$")
+    #
+    # plt.subplot(3, 1, 3)
+    # plt.plot(t, err, linewidth='2')
+    # plt.ylabel("$\|y_1-y_2\|^2$")
+    # plt.xlabel("time (s)")
 
     plt.show()
