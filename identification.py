@@ -1,24 +1,32 @@
-#!/usr/bin/env python
-
-from pydrake.all import *
+from pydrake.all import (
+    getDrakePath, FindResourceOrThrow,
+    DiagramBuilder, SceneGraph,
+    MultibodyPlant, Parser,
+    RigidTransform, CoulombFriction, HalfSpace, GeometryFrame, GeometryInstance,
+    Box, MakePhongIllustrationProperties, Sphere, LogVectorOutput, DrakeVisualizer,
+    ConnectContactResultsToDrakeVisualizer,
+    plot_system_graphviz, Simulator, RollPitchYaw
+)
 from controllers import *
-from planners import BasicTrunkPlanner, TowrTrunkPlanner
+from planners import BasicTrunkPlanner, TowrTrunkPlanner, LegSineTrunkPlanner
 import os
 import sys
 import matplotlib.pyplot as plt
+import numpy as np
 
 ############### Common Parameters ###################
 show_trunk_model = True
 use_lcm = False
 
-planning_method = "basic"  # "towr" or "basic"
-control_method = "MPTC"  # ID = Inverse Dynamics (standard QP),
+planning_method = "leg_sine"  # "towr" or "basic" or "leg_sine"
+control_method = "Identification"  # ID = Inverse Dynamics (standard QP),
 # B = Basic (simple joint-space PD),
 # MPTC = task-space passivity
 # PC = passivity-constrained
 # CLF = control-lyapunov-function based
+# Identification = Joint PD for Identification
 
-sim_time = 3.5
+sim_time = 10
 dt = 5e-3
 target_realtime_rate = 1.0
 
@@ -36,11 +44,17 @@ robot_description_file = "drake/" + os.path.relpath(robot_description_path, star
 robot_urdf = FindResourceOrThrow(robot_description_file)
 builder = DiagramBuilder()
 scene_graph = builder.AddSystem(SceneGraph())
+
 plant = builder.AddSystem(MultibodyPlant(time_step=dt))
+assert isinstance(plant, MultibodyPlant)
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 quad = Parser(plant=plant).AddModelFromFile(robot_urdf, "quad")
 quad_frame = plant.GetFrameByName("body")
-
+X_dog = RigidTransform(
+    RollPitchYaw(0, 0, 0).ToRotationMatrix(),
+    [0, 0, 1.5]
+)
+plant.WeldFrames(plant.world_frame(), quad_frame, X_dog)
 
 # Add a flat ground with friction
 X_BG = RigidTransform()
@@ -102,6 +116,8 @@ if planning_method == "basic":
     planner = builder.AddSystem(BasicTrunkPlanner(trunk_frame_ids))
 elif planning_method == "towr":
     planner = builder.AddSystem(TowrTrunkPlanner(trunk_frame_ids))
+elif planning_method == "leg_sine":
+    planner = builder.AddSystem(LegSineTrunkPlanner(trunk_frame_ids))
 else:
     print("Invalid planning method %s" % planning_method)
     sys.exit(1)
@@ -116,6 +132,8 @@ elif control_method == "PC":
     controller = builder.AddSystem(PCController(plant, dt, use_lcm=use_lcm))
 elif control_method == "CLF":
     controller = builder.AddSystem(CLFController(plant, dt, use_lcm=use_lcm))
+elif control_method == "Identification":
+    controller = builder.AddSystem(IdentificationController(plant, dt, use_lcm=use_lcm))
 else:
     print("Invalid control method %s" % control_method)
     sys.exit(1)
@@ -155,7 +173,7 @@ diagram_context = diagram.CreateDefaultContext()
 
 # Visualize the diagram
 if show_diagram:
-    plt.figure()
+    plt.figure(figsize=(120, 80))
     plot_system_graphviz(diagram, max_depth=2)
     plt.show()
 
@@ -171,12 +189,16 @@ else:
 
 # Set initial states
 plant_context = diagram.GetMutableSubsystemContext(plant, diagram_context)
-q0 = np.asarray([1.0, 0.0, 0.0, 0.0,  # base orientation
-                 0.0, 0.0, 0.3,  # base position
-                 0.0, -0.8, 1.6,
-                 0.0, -0.8, 1.6,
-                 0.0, -0.8, 1.6,
-                 0.0, -0.8, 1.6])
+# q0 = np.asarray([1.0, 0.0, 0.0, 0.0,  # base orientation
+#                  0.0, 0.0, 0.3,  # base position
+#                  0.0, -0.8, 1.6,
+#                  0.0, -0.8, 1.6,
+#                  0.0, -0.8, 1.6,
+#                  0.0, -0.8, 1.6])
+q0 = np.asarray([0.2, 0.11, 1.2,
+                 0.2, -0.11, 1.2,
+                 -0.2, 0.11, 1.2,
+                 -0.2, -0.11, 1.2])
 qd0 = np.zeros(plant.num_velocities())
 plant.SetPositions(plant_context, q0)
 plant.SetVelocities(plant_context, qd0)
