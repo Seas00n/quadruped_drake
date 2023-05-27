@@ -35,7 +35,8 @@ class IdentificationController(LeafSystem):
         # Declare input and output ports
         self.DeclareVectorInputPort(
             "quad_state",
-            BasicVector(self.plant.num_positions()*4))
+            BasicVector(self.plant.num_positions()+self.plant.num_velocities()))
+
 
         self.DeclareVectorOutputPort(
             "quad_torques",
@@ -56,12 +57,13 @@ class IdentificationController(LeafSystem):
         # 数据存储输出
         self.DeclareVectorOutputPort(
             "output_metrics",
-            BasicVector(self.plant.num_positions() + self.plant.num_velocities()),
+            BasicVector(self.plant.num_positions()*3),
             self.SetLoggingOutputs)
         # 规划轨迹输入
         self.DeclareAbstractInputPort(
             "trunk_input",
             AbstractValue.Make({}))
+
         # Handle whether or not we're communicating with a real robot and/or simulator
         # over LCM.
         self.use_lcm = use_lcm
@@ -107,7 +109,6 @@ class IdentificationController(LeafSystem):
         state = self.EvalVectorInput(context, 0).get_value()
         q = state[:self.plant.num_positions()]
         v = state[-self.plant.num_velocities():]
-
         self.plant.SetPositions(self.context, q)
         self.plant.SetVelocities(self.context, v)
 
@@ -125,8 +126,7 @@ class IdentificationController(LeafSystem):
 
         """
         # output.SetFromVector(np.asarray([self.V, self.err, self.res, self.Vdot]))
-        output.SetFromVector(np.hstack((self.p_feet_actual, self.pd_feet_actual,
-                                        self.pdd_feet_actual, self.torque_feet)))
+        output.SetFromVector(np.hstack((self.p_feet_actual, self.pd_feet_actual,self.torque_feet)))
 
     def DoSetControlTorques(self, context, output):
         """
@@ -198,12 +198,13 @@ class IdentificationController(LeafSystem):
         # Nominal joint angles
         T = 5e-3*400
         w = 2*np.pi/T
-        amp = 0.3
+        amp = 0.1
         t = context.get_time()
         q_nom = np.ones(self.plant.num_positions())*amp*np.sin(w*t)
         q_nom[0::6] = -q_nom[0::6]
-        q_nom[1::3] = q_nom[1::3]-0.8
-        q_nom[2::3] = q_nom[2::3]+1.6
+        q_nom[0::3] = q_nom[0::3]*0.5
+        q_nom[1::3] = q_nom[1::3]*2-0.8
+        q_nom[2::3] = q_nom[2::3]*2+1.6
         qd_nom = np.ones(self.plant.num_velocities())*amp*w*np.cos(w*t)
 
         q_err = q-q_nom
@@ -213,10 +214,9 @@ class IdentificationController(LeafSystem):
         self.pd_feet_actual = v
         self.p_feet_desired = q_nom
         self.pd_feet_desired = qd_nom
-        self.pdd_feet_actual = self.plant.get_generalized_acceleration_output_port()
 
         # joint PD
-        Kp = 12 * np.eye(self.plant.num_positions())
+        Kp = 15 * np.eye(self.plant.num_positions())
         Kd = 0.5* np.eye(self.plant.num_velocities())
         tau = - Kp @ q_err - Kd @ qd_err
 

@@ -14,6 +14,7 @@ import os
 import sys
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import io
 
 ############### Common Parameters ###################
 show_trunk_model = True
@@ -27,7 +28,7 @@ control_method = "Identification"  # ID = Inverse Dynamics (standard QP),
 # CLF = control-lyapunov-function based
 # Identification = Joint PD for Identification
 
-sim_time = 5
+sim_time = 20
 dt = 5e-3
 target_realtime_rate = 1.0
 
@@ -162,10 +163,10 @@ builder.Connect(controller.GetOutputPort("quad_torques"),
                 plant.get_actuation_input_port(quad))
 builder.Connect(plant.get_state_output_port(),
                 controller.GetInputPort("quad_state"))
-builder.Connect(plant.get_generalized_acceleration_output_port(),
-                controller.GetInputPort("quad_accel"))
+
 # Add loggers
 logger = LogVectorOutput(controller.GetOutputPort("output_metrics"), builder)
+logger_accel = LogVectorOutput(plant.get_generalized_acceleration_output_port(), builder)
 
 # Set up the Visualizer
 DrakeVisualizer().AddToBuilder(builder, scene_graph)
@@ -213,8 +214,15 @@ simulator.AdvanceTo(sim_time)
 
 if make_plots:
     log = logger.FindLog(diagram_context)
-
+    log_accel = logger_accel.FindLog(diagram_context)
     # Plot stuff
+    t = log.sample_times()
+    io.savemat("./Problem1/time.mat", {"t": t})
+    q_qd_torque = log.data()
+    io.savemat("./Problem1/q_qd_torque.mat", {"q_qd_torque": q_qd_torque})
+    qdd = log_accel.data()
+    io.savemat("./Problem1/qdd.mat", {"qdd": qdd})
+
     t = log.sample_times()[1:]
     p_feet_desired = log.data()[0, 1:]
     pd_feet_desired = log.data()[12, 1:]
