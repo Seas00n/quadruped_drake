@@ -5,8 +5,9 @@ from pydrake.all import (
     RigidTransform, CoulombFriction, HalfSpace, GeometryFrame, GeometryInstance,
     Box, MakePhongIllustrationProperties, Sphere, LogVectorOutput, DrakeVisualizer,
     ConnectContactResultsToDrakeVisualizer,
-    plot_system_graphviz, Simulator, RollPitchYaw
+    plot_system_graphviz, Simulator, RollPitchYaw,
 )
+from manipulation.scenarios import AddMultibodyTriad
 from controllers import *
 from planners import BasicTrunkPlanner, TowrTrunkPlanner, LegSineTrunkPlanner
 import os
@@ -111,6 +112,9 @@ for foot in ["lf", "rf", "lh", "rh"]:
     scene_graph.RegisterGeometry(trunk_source, foot_frame.id(), foot_geometry)
     trunk_frame_ids[foot] = foot_frame.id()
 
+for body_name in ["body", "abduct_fl", "thigh_fl", "shank_fl"]:
+    AddMultibodyTriad(plant.GetFrameByName(body_name), scene_graph)
+
 # Create high-level trunk-model planner and low-level whole-body controller
 if planning_method == "basic":
     planner = builder.AddSystem(BasicTrunkPlanner(trunk_frame_ids))
@@ -158,7 +162,8 @@ builder.Connect(controller.GetOutputPort("quad_torques"),
                 plant.get_actuation_input_port(quad))
 builder.Connect(plant.get_state_output_port(),
                 controller.GetInputPort("quad_state"))
-
+builder.Connect(plant.get_generalized_acceleration_output_port(),
+                controller.GetInputPort("quad_accel"))
 # Add loggers
 logger = LogVectorOutput(controller.GetOutputPort("output_metrics"), builder)
 

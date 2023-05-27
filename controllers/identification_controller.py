@@ -35,7 +35,7 @@ class IdentificationController(LeafSystem):
         # Declare input and output ports
         self.DeclareVectorInputPort(
             "quad_state",
-            BasicVector(self.plant.num_positions() + self.plant.num_velocities()))
+            BasicVector(self.plant.num_positions()*4))
 
         self.DeclareVectorOutputPort(
             "quad_torques",
@@ -51,6 +51,8 @@ class IdentificationController(LeafSystem):
         self.pd_feet_desired = np.zeros(self.plant.num_velocities())
         self.p_feet_actual = np.zeros(self.plant.num_positions())
         self.pd_feet_actual = np.zeros(self.plant.num_velocities())
+        self.pdd_feet_actual = np.zeros(self.plant.num_positions())
+        self.torque_feet = np.zeros(self.plant.num_positions())
         # 数据存储输出
         self.DeclareVectorOutputPort(
             "output_metrics",
@@ -109,6 +111,122 @@ class IdentificationController(LeafSystem):
         self.plant.SetPositions(self.context, q)
         self.plant.SetVelocities(self.context, v)
 
+
+    def SetLoggingOutputs(self, context, output):
+        """
+        Set outputs for logging, namely a vector consisting of
+        the current simulation function
+
+            V = 1/2 qd_tilde'*M*qd_tilde + pd_tilde'*Kp*pd_tilde
+
+        and the current output error
+
+            pd_tilde'*pd_tilde.
+
+        """
+        # output.SetFromVector(np.asarray([self.V, self.err, self.res, self.Vdot]))
+        output.SetFromVector(np.hstack((self.p_feet_actual, self.pd_feet_actual,
+                                        self.pdd_feet_actual, self.torque_feet)))
+
+    def DoSetControlTorques(self, context, output):
+        """
+        This function gets called at every timestep and sends output torques to
+        the simulator (and/or over LCM, if needed).
+        """
+        if self.use_lcm:
+            # Get robot's current state (q,v) from LCM
+            self.lc.handle()
+            q = self.q
+            v = self.v
+            self.plant.SetPositions(self.context, self.q)
+            self.plant.SetVelocities(self.context, self.v)
+        else:
+            # Get robot's current state (q,v) from Drake
+            self.UpdateStoredContext(context)
+            q = self.plant.GetPositions(self.context)
+            v = self.plant.GetVelocities(self.context)
+
+        # Compute controls to apply
+        u = self.ControlLaw(context, q, v)
+
+        if self.use_lcm:
+            # Send control outputs over LCM
+            msg = robot_state_control_lcmt()
+            S = self.plant.MakeActuationMatrix().T
+            msg.tau = (S.T @ u)[-self.plant.num_actuators():]  # The mini cheetah controller assumes
+            # control torques are in the same order as
+            # v, but drake uses a different (custom) mapping.
+            self.lc.publish("robot_control_input", msg.encode())
+
+            # We'll just send zero control inputs to the drake simulator
+            output.SetFromVector(np.zeros(self.plant.num_actuators()))
+        else:
+            # Send control outputs to drake
+            output.SetFromVector(u)
+
+    def ControlLaw(self, context, q, v):
+        """
+        This function is called by DoSetControlTorques, and consists of the main control
+        code for the robot.
+        """
+        M, C, tau_g, S = self.CalcDynamics()
+        print(M)
+        # Some dynamics computations
+        # 规划值
+        trunk_data = self.EvalAbstractInput(context, 1).get_value()
+        p_feet_nom = np.array([trunk_data["p_lf"], trunk_data["p_rf"], trunk_data["p_lh"], trunk_data["p_rh"]])
+        pd_feet_nom = np.array([trunk_data["pd_lf"], trunk_data["pd_rf"], trunk_data["pd_lh"], trunk_data["pd_rh"]])
+        p_feet_nom = p_feet_nom.reshape((12,))
+        pd_feet_nom = pd_feet_nom.reshape((12,))
+        print("p_lf planned from controller{}".format(trunk_data["p_lf"]))
+        print("pd_lf planner from controller{}".format(trunk_data["pd_lf"]))
+
+        self.lf_foot_frame = self.plant.GetFrameByName("LF_FOOT")  # left front
+        self.rf_foot_frame = self.plant.GetFrameByName("RF_FOOT")  # right front
+        self.lh_foot_frame = self.plant.GetFrameByName("LH_FOOT")  # left hind
+        self.rh_foot_frame = self.plant.GetFrameByName("RH_FOOT")  # right hind
+        p_lf, J_lf, Jdv_lf = self.CalcFramePositionQuantities(self.lf_foot_frame)
+        p_rf, J_rf, Jdv_rf = self.CalcFramePositionQuantities(self.rf_foot_frame)
+        p_lh, J_lh, Jdv_lh = self.CalcFramePositionQuantities(self.lh_foot_frame)
+        p_rh, J_rh, Jdv_rh = self.CalcFramePositionQuantities(self.rh_foot_frame)
+        p_feet_real = np.vstack([p_lf, p_rf, p_lh, p_rh]).reshape((12,))
+        print("p_lf real from controller{}".format(p_lf.reshape((3,))))
+
+        q_err = p_feet_real - p_feet_nom  # 末端执行器位置误差
+
+        qd_err = self.plant.MapQDotToVelocity(self.context, v) - pd_feet_nom  # 末端执行器速度误差
+        # Nominal joint angles
+        T = 5e-3*400
+        w = 2*np.pi/T
+        amp = 0.3
+        t = context.get_time()
+        q_nom = np.ones(self.plant.num_positions())*amp*np.sin(w*t)
+        q_nom[0::6] = -q_nom[0::6]
+        q_nom[1::3] = q_nom[1::3]-0.8
+        q_nom[2::3] = q_nom[2::3]+1.6
+        qd_nom = np.ones(self.plant.num_velocities())*amp*w*np.cos(w*t)
+
+        q_err = q-q_nom
+        qd_err = v-qd_nom
+
+        self.p_feet_actual = q
+        self.pd_feet_actual = v
+        self.p_feet_desired = q_nom
+        self.pd_feet_desired = qd_nom
+        self.pdd_feet_actual = self.plant.get_generalized_acceleration_output_port()
+
+        # joint PD
+        Kp = 12 * np.eye(self.plant.num_positions())
+        Kd = 0.5* np.eye(self.plant.num_velocities())
+        tau = - Kp @ q_err - Kd @ qd_err
+
+        # Use actuation matrix to map generalized forces to control inputs
+        # u = S @ tau
+        u = tau
+        u = np.clip(u, -150, 150)
+        self.torque_feet = u
+        print("----------------------------------------------------")
+        return u
     def CalcDynamics(self):
         """
         Compute dynamics quantities, M, Cv, tau_g, and S such that the
@@ -281,113 +399,3 @@ class IdentificationController(LeafSystem):
                                                      self.world_frame)
 
         return pose, J, Jdv.get_coeffs()
-
-    def SetLoggingOutputs(self, context, output):
-        """
-        Set outputs for logging, namely a vector consisting of
-        the current simulation function
-
-            V = 1/2 qd_tilde'*M*qd_tilde + pd_tilde'*Kp*pd_tilde
-
-        and the current output error
-
-            pd_tilde'*pd_tilde.
-
-        """
-        # output.SetFromVector(np.asarray([self.V, self.err, self.res, self.Vdot]))
-        output.SetFromVector(np.hstack((self.p_feet_desired, self.p_feet_actual)))
-
-    def DoSetControlTorques(self, context, output):
-        """
-        This function gets called at every timestep and sends output torques to
-        the simulator (and/or over LCM, if needed).
-        """
-        if self.use_lcm:
-            # Get robot's current state (q,v) from LCM
-            self.lc.handle()
-            q = self.q
-            v = self.v
-            self.plant.SetPositions(self.context, self.q)
-            self.plant.SetVelocities(self.context, self.v)
-        else:
-            # Get robot's current state (q,v) from Drake
-            self.UpdateStoredContext(context)
-            q = self.plant.GetPositions(self.context)
-            v = self.plant.GetVelocities(self.context)
-
-        # Compute controls to apply
-        u = self.ControlLaw(context, q, v)
-
-        if self.use_lcm:
-            # Send control outputs over LCM
-            msg = robot_state_control_lcmt()
-            S = self.plant.MakeActuationMatrix().T
-            msg.tau = (S.T @ u)[-self.plant.num_actuators():]  # The mini cheetah controller assumes
-            # control torques are in the same order as
-            # v, but drake uses a different (custom) mapping.
-            self.lc.publish("robot_control_input", msg.encode())
-
-            # We'll just send zero control inputs to the drake simulator
-            output.SetFromVector(np.zeros(self.plant.num_actuators()))
-        else:
-            # Send control outputs to drake
-            output.SetFromVector(u)
-
-    def ControlLaw(self, context, q, v):
-        """
-        This function is called by DoSetControlTorques, and consists of the main control
-        code for the robot.
-        """
-        M, C, tau_g, S = self.CalcDynamics()
-        # Some dynamics computations
-        # 规划值
-        trunk_data = self.EvalAbstractInput(context, 1).get_value()
-        p_feet_nom = np.array([trunk_data["p_lf"], trunk_data["p_rf"], trunk_data["p_lh"], trunk_data["p_rh"]])
-        pd_feet_nom = np.array([trunk_data["pd_lf"], trunk_data["pd_rf"], trunk_data["pd_lh"], trunk_data["pd_rh"]])
-        p_feet_nom = p_feet_nom.reshape((12,))
-        pd_feet_nom = pd_feet_nom.reshape((12,))
-        print("p_lf planned from controller{}".format(trunk_data["p_lf"]))
-        print("pd_lf planner from controller{}".format(trunk_data["pd_lf"]))
-
-        self.lf_foot_frame = self.plant.GetFrameByName("LF_FOOT")  # left front
-        self.rf_foot_frame = self.plant.GetFrameByName("RF_FOOT")  # right front
-        self.lh_foot_frame = self.plant.GetFrameByName("LH_FOOT")  # left hind
-        self.rh_foot_frame = self.plant.GetFrameByName("RH_FOOT")  # right hind
-        p_lf, J_lf, Jdv_lf = self.CalcFramePositionQuantities(self.lf_foot_frame)
-        p_rf, J_rf, Jdv_rf = self.CalcFramePositionQuantities(self.rf_foot_frame)
-        p_lh, J_lh, Jdv_lh = self.CalcFramePositionQuantities(self.lh_foot_frame)
-        p_rh, J_rh, Jdv_rh = self.CalcFramePositionQuantities(self.rh_foot_frame)
-        p_feet_real = np.vstack([p_lf, p_rf, p_lh, p_rh]).reshape((12,))
-        print("p_lf real from controller{}".format(p_lf.reshape((3,))))
-
-        q_err = p_feet_real - p_feet_nom  # 末端执行器位置误差
-
-        qd_err = self.plant.MapQDotToVelocity(self.context, v) - pd_feet_nom  # 末端执行器速度误差
-        # Nominal joint angles
-        T = 5e-3*400
-        w = 2*np.pi/T
-        amp = 0.5
-        t = context.get_time()
-        q_nom = np.ones(self.plant.num_positions())*amp*np.sin(w*t)
-        q_nom[1::3] = q_nom[1::3]-0.8
-        q_nom[2::3] = q_nom[2::3]+1.6
-        qd_nom = np.ones(self.plant.num_velocities())*amp*w*np.cos(w*t)
-
-        q_err = q-q_nom
-        qd_err = v-qd_nom
-
-        self.p_feet_actual = q
-        self.pd_feet_actual = v
-        self.p_feet_desired = q_nom
-        self.pd_feet_desired = qd_nom
-        # joint PD
-        Kp = 5 * np.eye(self.plant.num_positions())
-        Kd = 0.2* np.eye(self.plant.num_velocities())
-        tau = - Kp @ q_err - Kd @ qd_err
-
-        # Use actuation matrix to map generalized forces to control inputs
-        # u = S @ tau
-        u = tau
-        u = np.clip(u, -150, 150)
-        print("----------------------------------------------------")
-        return u
