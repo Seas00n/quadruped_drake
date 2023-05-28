@@ -205,6 +205,7 @@ q0 = np.asarray([0.0, -0.8, 1.6,
                  0.0, -0.8, 1.6,
                  0.0, -0.8, 1.6,
                  0.0, -0.8, 1.6])
+# q0 = np.zeros(plant.num_positions())
 qd0 = np.zeros(plant.num_velocities())
 plant.SetPositions(plant_context, q0)
 plant.SetVelocities(plant_context, qd0)

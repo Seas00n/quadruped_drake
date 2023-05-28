@@ -35,8 +35,7 @@ class IdentificationController(LeafSystem):
         # Declare input and output ports
         self.DeclareVectorInputPort(
             "quad_state",
-            BasicVector(self.plant.num_positions()+self.plant.num_velocities()))
-
+            BasicVector(self.plant.num_positions() + self.plant.num_velocities()))
 
         self.DeclareVectorOutputPort(
             "quad_torques",
@@ -57,7 +56,7 @@ class IdentificationController(LeafSystem):
         # 数据存储输出
         self.DeclareVectorOutputPort(
             "output_metrics",
-            BasicVector(self.plant.num_positions()*3),
+            BasicVector(self.plant.num_positions() * 3),
             self.SetLoggingOutputs)
         # 规划轨迹输入
         self.DeclareAbstractInputPort(
@@ -112,7 +111,6 @@ class IdentificationController(LeafSystem):
         self.plant.SetPositions(self.context, q)
         self.plant.SetVelocities(self.context, v)
 
-
     def SetLoggingOutputs(self, context, output):
         """
         Set outputs for logging, namely a vector consisting of
@@ -126,7 +124,7 @@ class IdentificationController(LeafSystem):
 
         """
         # output.SetFromVector(np.asarray([self.V, self.err, self.res, self.Vdot]))
-        output.SetFromVector(np.hstack((self.p_feet_actual, self.pd_feet_actual,self.torque_feet)))
+        output.SetFromVector(np.hstack((self.p_feet_actual, self.pd_feet_actual, self.torque_feet)))
 
     def DoSetControlTorques(self, context, output):
         """
@@ -181,6 +179,12 @@ class IdentificationController(LeafSystem):
         print("p_lf planned from controller{}".format(trunk_data["p_lf"]))
         print("pd_lf planner from controller{}".format(trunk_data["pd_lf"]))
 
+        for body_name in ["body", "abduct_fl", "thigh_fl", "shank_fl"]:
+            frame = self.plant.GetFrameByName(body_name)
+            p_lf, _, _ = self.CalcFramePositionQuantities(frame)
+            print("frame{}".format(body_name))
+            print(p_lf)
+
         self.lf_foot_frame = self.plant.GetFrameByName("LF_FOOT")  # left front
         self.rf_foot_frame = self.plant.GetFrameByName("RF_FOOT")  # right front
         self.lh_foot_frame = self.plant.GetFrameByName("LH_FOOT")  # left hind
@@ -196,19 +200,19 @@ class IdentificationController(LeafSystem):
 
         qd_err = self.plant.MapQDotToVelocity(self.context, v) - pd_feet_nom  # 末端执行器速度误差
         # Nominal joint angles
-        T = 5e-3*400
-        w = 2*np.pi/T
+        T = 5e-3 * 400
+        w = 2 * np.pi / T
         amp = 0.1
         t = context.get_time()
-        q_nom = np.ones(self.plant.num_positions())*amp*np.sin(w*t)
+        q_nom = np.ones(self.plant.num_positions()) * amp * np.sin(w * t)
         q_nom[0::6] = -q_nom[0::6]
-        q_nom[0::3] = q_nom[0::3]*0.5
-        q_nom[1::3] = q_nom[1::3]*2-0.8
-        q_nom[2::3] = q_nom[2::3]*2+1.6
-        qd_nom = np.ones(self.plant.num_velocities())*amp*w*np.cos(w*t)
+        q_nom[0::3] = q_nom[0::3] * 0.5
+        q_nom[1::3] = q_nom[1::3] * 2 - 0.8
+        q_nom[2::3] = q_nom[2::3] * 2 + 1.6
+        qd_nom = np.ones(self.plant.num_velocities()) * amp * w * np.cos(w * t)
 
-        q_err = q-q_nom
-        qd_err = v-qd_nom
+        q_err = q - q_nom
+        qd_err = v - qd_nom
 
         self.p_feet_actual = q
         self.pd_feet_actual = v
@@ -217,7 +221,7 @@ class IdentificationController(LeafSystem):
 
         # joint PD
         Kp = 15 * np.eye(self.plant.num_positions())
-        Kd = 0.5* np.eye(self.plant.num_velocities())
+        Kd = 0.5 * np.eye(self.plant.num_velocities())
         tau = - Kp @ q_err - Kd @ qd_err
 
         # Use actuation matrix to map generalized forces to control inputs
@@ -227,6 +231,7 @@ class IdentificationController(LeafSystem):
         self.torque_feet = u
         print("----------------------------------------------------")
         return u
+
     def CalcDynamics(self):
         """
         Compute dynamics quantities, M, Cv, tau_g, and S such that the
