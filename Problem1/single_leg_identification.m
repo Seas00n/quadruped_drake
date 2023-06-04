@@ -58,10 +58,10 @@ for i=1:num_points
     f = f-2*torque(:,i)'*Ym/num_points;
 end
 e = e/num_points+0.2*(pi_hat-inertial_parameters_default)'*(pi_hat-inertial_parameters_default);
-A = A+0.2*eye(30);
+A = A+2*eye(30);
 f = f-2*inertial_parameters_default';
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% use quadprog
+% % use quadprog
 pi_ = quadprog(A*2,f');
 for i=1:num_points
     % for each point use some skill to calculate Ym
@@ -76,12 +76,38 @@ end
 plot(t,torque(2,:))
 hold on
 plot(t,tau_cal_list(2,:))
+J1 = cal_Pseudo_Inertial_Matrix(pi_(1:10));
+J2 = cal_Pseudo_Inertial_Matrix(pi_(11:20));
+J3 = cal_Pseudo_Inertial_Matrix(pi_(21:30));
+try chol(J1)
+    disp('J1 is symmetric positive definite.')
+catch ME
+    disp('J1 is not symmetric positive definite')
+end
+
+try chol(J2)
+    disp('J2 is symmetric positive definite.')
+catch ME
+    disp('J2 is not symmetric positive definite')
+end
+
+try chol(J3)
+    disp('J3 is symmetric positive definite.')
+catch ME
+    disp('J3 is not symmetric positive definite')
+end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
 J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
 J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
-Constraints = [J1>=0,J2>=0,J3>=0];
-optimize([],e);
+Constraints = [J1>=eye(4)*1e-8,J2>=eye(4)*1e-8,J3>=eye(4)*1e-8];
+sol = optimize(Constraints,e);
+if sol.problem == 0
+ disp('x should have a value')
+ value(pi_hat)
+else
+ yalmiperror(sol.problem)
+end
 pi_hat = value(pi_hat);
 for i=1:num_points
     Ym = zeros(3,30);
@@ -94,6 +120,29 @@ for i=1:num_points
 end
 plot(t,tau_cal_list(2,:));
 legend('real','use quadprog','use sdp')
+J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
+J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
+J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
+try chol(J1)
+    disp('J1 is symmetric positive definite.')
+catch ME
+    disp('J1 is not symmetric positive definite')
+end
+
+try chol(J2)
+    disp('J2 is symmetric positive definite.')
+catch ME
+    disp('J2 is not symmetric positive definite')
+end
+
+try chol(J3)
+    disp('J3 is symmetric positive definite.')
+catch ME
+    disp('J3 is not symmetric positive definite')
+end
+
+
+
 
 function tau = rnse(q_list,qd_list,qdd_list,inertial_parameters)
 %{
@@ -170,7 +219,9 @@ function J = cal_Pseudo_Inertial_Matrix(inertial_parameters)
    Izz = inertial_parameters(10); 
    h = [hx;hy;hz];
    I = [Ixx,Ixy,Ixz;Ixy,Iyy,Iyz;Ixz,Iyz,Izz];
-   Sigma = 0.5*trace(I)*eye(3,3)-I;
+   Sigma = [-1/2*Ixx+1/2*Iyy+1/2*Izz,Ixy,Ixz;
+           Ixy, -1/2*Iyy+1/2*Ixx+1/2*Izz,Iyz;
+           Ixz,Iyz,-1/2*Izz+1/2*Ixx+1/2*Iyy];
    J = sdpvar(4,4);
    J(1:3,1:3) = Sigma;
    J(1:3,4) = h;

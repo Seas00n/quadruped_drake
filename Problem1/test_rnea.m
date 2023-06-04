@@ -45,7 +45,6 @@ for i =1:num_points
         Ym(:,j) = rnea(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
     end
     tau_list_cal(:,i) = Ym*inertial_parameters_default;
-    %tau_list_cal(:,i) = rnea(q(:,i),qd(:,i),qdd(:,i),inertial_parameters_default);
 end
 plot(t,tau_list_cal(2,:));
 hold on;
