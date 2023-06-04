@@ -101,7 +101,7 @@ J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
 J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
 J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
 Constraints = [J1>=eye(4)*1e-8,J2>=eye(4)*1e-8,J3>=eye(4)*1e-8];
-sol = optimize(Constraints,e);
+sol = optimize([],e);
 if sol.problem == 0
  disp('x should have a value')
  value(pi_hat)
