@@ -1,31 +1,50 @@
 clear all;clc;close all
+addpath('./mr/')
 % load simulation data
 load("time.mat")
 load("q_qd_torque.mat")
 load("qdd.mat")
-q = q_qd_torque(1:3,:);
-qd = q_qd_torque(13:15,:);
-qdd = qdd(1:3,:);
-torque = q_qd_torque(25:27,:);
-inertial_parameters = zeros(30,1);
+num_points = 1000;
+t = t(1001:1000+num_points);
+q = q_qd_torque(1:3,1001:1000+num_points);
+qd = q_qd_torque(13:15,1001:1000+num_points);
+qdd = qdd(1:3,1001:1000+num_points);
+torque = q_qd_torque(25:27,1001:1000+num_points);
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+global m1 xyz_joint1_world xyz_com1_joint1 I1_com
+global m2 xyz_joint2_joint1 xyz_joint2_world xyz_com2_joint2 I2_com
+global m3 xyz_joint3_joint2 xyz_joint3_world xyz_com3_joint3 I3_com
+m1 = 0.54;
+xyz_joint1_world = [0.19,0.049,0];
+xyz_com1_joint1 = [0,0.036,0];
+I1_com = [0.000381,0.000058,0.00000045,0.000560,0.00000095,0.000444];
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+m2 = 0.634;
+xyz_joint2_joint1 = [0,0.062,0.0];
+xyz_com2_joint2 = [0.0,0.016,-0.02];
+I2_com = [0.001983,0.000245,0.000013,0.002103,0.0000015,0.000508];
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+m3 = 0.064;
+xyz_joint3_joint2 = [0,0,-0.209];
+xyz_com3_joint3 = [0,0,-0.209];
+I3_com = [0.000245,0.0,0.0,0.000248,0.0,0.000006];
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+xyz_joint2_world = xyz_joint2_joint1+xyz_joint1_world;
+xyz_joint3_world = xyz_joint3_joint2+xyz_joint2_world;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+inertial_parameters_default = [change_Ic_coordinate([m1,xyz_com1_joint1,I1_com]),change_Ic_coordinate([m2,xyz_com2_joint2,I2_com]),change_Ic_coordinate([m3,xyz_com3_joint3,I3_com])];
+inertial_parameters_default = inertial_parameters_default';
+
 % m hx hy hz Ixx Ixy Ixz Iyy Iyz Izz
-W = 0.05;
-A_half = zeros(30,30);
-f_T = zeros(1,30);
-A_half = A_half + W*eye(30);
-f_T = f_T - 2*W*torque';
-inertial_0 = zeros(1,10);
-inertial_0 = add_inertial_parameters(0.54,[0.19,0.049,0],[0.0,0.036,0.], ...
-    [0.000381,0.000058,0.00000045,0.000560,0.00000095,0.000444]);
-inertial_0 = add_inertial_parameters(0.54,[0.19,0.049,0],[0.0,0.036,0.], ...
-    [0.000381,0.000058,0.00000045,0.000560,0.00000095,0.000444]);
-inertial_0 = add_inertial_parameters(0.634,[0.19,0.049+0.062,0],[0.0,0.036,0.], ...
-    [0.000381,0.000058,0.00000045,0.000560,0.00000095,0.000444]);
+num_points = size(q,2);
+tau_cal_list = zeros(3,num_points);
+pi_hat = sdpvar(30,1);
+e = 0;
 
 
-
-
-for i=1:size(q,2)
+A = zeros(30,30);
+f = zeros(1,30);
+for i=1:num_points
     % for each point use some skill to calculate Ym
     Ym = zeros(3,30);
     for j=1:30
@@ -33,13 +52,48 @@ for i=1:size(q,2)
         temp_inertial(j) = 1;
         Ym(:,j) = rnse(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
     end
-    A_half = A_half+Ym'*Ym;
-    f_T = f-2*torque(:,i)'*Ym;
+    tau_cal_list(:,i) = Ym*inertial_parameters_default;
+    e = e+(Ym*pi_hat-torque(:,i))'*(Ym*pi_hat-torque(:,i));
+    A = A+Ym'*Ym;
+    f = f-2*torque(:,i)'*Ym;
 end
-A = 2*A_half;
-f = f_T';
+e = e/num_points+0.2*(pi_hat-inertial_parameters_default)'*(pi_hat-inertial_parameters_default);
+A = A+0.2*eye(30);
+f = f-2*inertial_parameters_default';
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+pi_ = quadprog(A*2,f')
+for i=1:num_points
+    % for each point use some skill to calculate Ym
+    Ym = zeros(3,30);
+    for j=1:30
+        temp_inertial = zeros(30,1);
+        temp_inertial(j) = 1;
+        Ym(:,j) = rnse(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
+    end
+    tau_cal_list(:,i) = Ym*pi_;
+end
+plot(t,tau_cal_list(1,:))
+hold on
+plot(t,torque(1,:))
 
 
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
+J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
+J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
+Constraints = [J1>=0,J2>=0,J3>=0];
+optimize([],e);
+value(pi_hat)
+% J1 = cal_Pseudo_Inertial_Matrix(inertial_parameters_default(1:10));
+% J2 = cal_Pseudo_Inertial_Matrix(inertial_parameters_default(11:20));
+% J3 = cal_Pseudo_Inertial_Matrix(inertial_parameters_default(21:30));
+% try chol(J3)
+%     disp('Matrix is symmetric positive definite.')
+% catch ME
+%     disp('Matrix is not symmetric positive definite')
+% end
 
 
 
@@ -51,61 +105,95 @@ qd_list = joint angle velocity list
 qdd_list = joint angle accel list
 g = [0;0;-9.8]
 Mlist = list of link frame {i} relative to {i-1} at home position
-Glist = Spatial inertial matrices Gi of links
-Slist = Screw axis 
+Glist = Spatial inertial matrices Gi of links in link i frame(not com frame)
+Slist = Screw axis of joint i in world frame at home position.
 %}
+global m1 xyz_joint1_world xyz_com1_joint1 I1_com
+global m2 xyz_joint2_joint1 xyz_joint2_world xyz_com2_joint2 I2_com
+global m3 xyz_joint3_joint2 xyz_joint3_world xyz_com3_joint3 I3_com
 g = [0;0;-9.8];
 % from urdf
-M01 = [[1,0,0,0.19];
-       [0,1,0,0.049];
-       [0,0,1,0];
+M01 = [[1,0,0,xyz_joint1_world(1)];
+       [0,1,0,xyz_joint1_world(2)];
+       [0,0,1,xyz_joint1_world(3)];
        [0,0,0,1]];
-M12 = [[1,0,0,0.00];
-       [0,1,0,0.062];
-       [0,0,1,0];
+M12 = [[1,0,0,xyz_joint2_joint1(1)];
+       [0,1,0,xyz_joint2_joint1(2)];
+       [0,0,1,xyz_joint2_joint1(3)];
        [0,0,0,1]];
-M23 = [[1,0,0,0];
+M23 = [[1,0,0,xyz_joint3_joint2(1)];
+       [0,1,0,xyz_joint3_joint2(2)];
+       [0,0,1,xyz_joint3_joint2(3)];
+       [0,0,0,1]];
+M34 = [[1,0,0,0];
        [0,1,0,0];
-       [0,0,1,-0.209];
-       [0,0,0,1.29]];
+       [0,0,1,0];
+       [0,0,0,1]];
 Ftip = zeros(6,1);
 G1 = getG(inertial_parameters(1:10));
 G2 = getG(inertial_parameters(11:20));
 G3 = getG(inertial_parameters(21:30));
 Glist = cat(3,G1,G2,G3);
-Mlist = cat(3,M01,M02,M03);
-S1 = ScrewToAxis([0.19;0.049;0],[1;0;0],0);
-S2 = ScrewToAxis([0.19;0.111;0],[0;-1;0],0);
-S3 = ScrewToAxis([0.19;0.111;-0.209],[0;-1;0],0);
+Mlist = cat(3,M01,M12,M23,M34);
+S1 = ScrewToAxis(xyz_joint1_world',[1;0;0],0);
+S2 = ScrewToAxis(xyz_joint2_world',[0;-1;0],0);
+S3 = ScrewToAxis(xyz_joint3_world',[0;-1;0],0);
 Slist = [S1,S2,S3];
 tau = InverseDynamics(q_list,qd_list,qdd_list, ...
-    Ftip,Mlist,Glist,Slist);
+    g,Ftip,Mlist,Glist,Slist);
 end
 function G = getG(inertial_parameters)
-   m = inertial_parameters(1);
-   hx = inertial_parameters(2);
+   m = inertial_parameters(1);% mass
+   hx = inertial_parameters(2);% h=mc
    hy = inertial_parameters(3);
    hz = inertial_parameters(4);
-   Ixx = inertial_parameters(5);
+   Ixx = inertial_parameters(5);%I
    Ixy = inertial_parameters(6);
    Ixz = inertial_parameters(7);
    Iyy = inertial_parameters(8);
    Iyz = inertial_parameters(9);
    Izz = inertial_parameters(10);
    G =  zeros(6,6);
+   skew_h = VecToso3([hx;hy;hz]);
    G(1:3,1:3) = [Ixx,Ixy,Ixz;Ixy,Iyy,Iyz;Ixz,Iyz,Izz];
-   G(4:6,1:3) = VecToso3([hx,hy,hz]);
-   G(1:3,4:6) = G(4:6,1:3)';
+   G(4:6,1:3) = skew_h';
+   G(1:3,4:6) = skew_h;
    G(4:6,4:6) = m*eye(3);
 end
-function para = add_inertial_parameters(m,origin_xyz,cop_xyz,inertial)
-    if para(1)==0
-        para(1) = m;
-        para(2:4) = m*origin_xyz+m*cop_xyz;
-        para(5:10) = inertial;
-    else
-        para = [para,m];
-        para = [para,m*origin_xyz+m*cop_xyz];
-        para = [para,inertial];
-    end
+function J = cal_Pseudo_Inertial_Matrix(inertial_parameters)
+    m = inertial_parameters(1);% mass
+   hx = inertial_parameters(2);%mc
+   hy = inertial_parameters(3);
+   hz = inertial_parameters(4);
+   Ixx = inertial_parameters(5);%I
+   Ixy = inertial_parameters(6);
+   Ixz = inertial_parameters(7);
+   Iyy = inertial_parameters(8);
+   Iyz = inertial_parameters(9);
+   Izz = inertial_parameters(10); 
+   h = [hx;hy;hz];
+   I = [Ixx,Ixy,Ixz;Ixy,Iyy,Iyz;Ixz,Iyz,Izz];
+   Sigma = 0.5*trace(I)*eye(3,3)-I;
+   J = sdpvar(4,4);
+   J(1:3,1:3) = Sigma;
+   J(1:3,4) = h;
+   J(4,1:3) = h';
+   J(4,4) = m;
+end
+function inertial_joint = change_Ic_coordinate(inertial_parameters)
+   m = inertial_parameters(1);% mass
+   cx = inertial_parameters(2);%c
+   cy = inertial_parameters(3);
+   cz = inertial_parameters(4);
+   Ixx = inertial_parameters(5);%Ic
+   Ixy = inertial_parameters(6);
+   Ixz = inertial_parameters(7);
+   Iyy = inertial_parameters(8);
+   Iyz = inertial_parameters(9);
+   Izz = inertial_parameters(10);
+   G =  zeros(6,6);
+   skew_c = VecToso3([cx;cy;cz]);
+   Ic = [Ixx,Ixy,Ixz;Ixy,Iyy,Iyz;Ixz,Iyz,Izz]+m*skew_c*skew_c';
+   I = [Ic(1,1),Ic(1,2),Ic(1,3),Ic(2,2),Ic(2,3),Ic(3,3)];
+   inertial_joint = [m,m*cx,m*cy,m*cz,I];
 end

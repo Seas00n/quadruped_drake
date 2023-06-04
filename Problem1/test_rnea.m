@@ -1,15 +1,16 @@
-clear all;clc;close all
+clear all;clc;close all;
 addpath('./mr/')
-% load simulation data
 load("time.mat")
 load("q_qd_torque.mat")
 load("qdd.mat")
-num_points = 2000;
-t = t(1001:1000+num_points);
-q = q_qd_torque(1:3,1001:1000+num_points);
-qd = q_qd_torque(13:15,1001:1000+num_points);
-qdd = qdd(1:3,1001:1000+num_points);
-torque = q_qd_torque(25:27,1001:1000+num_points);
+num_points =2000;
+t = t(1:num_points);
+rad_to_deg = pi/180;
+deg_to_rad = 180/pi;
+q = q_qd_torque(1:3,1:num_points);
+qd = q_qd_torque(13:15,1:num_points);
+qdd = qdd(1:3,1:num_points);
+torque = q_qd_torque(25:27,1:num_points);
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 global m1 xyz_joint1_world xyz_com1_joint1 I1_com
 global m2 xyz_joint2_joint1 xyz_joint2_world xyz_com2_joint2 I2_com
@@ -34,68 +35,26 @@ xyz_joint3_world = xyz_joint3_joint2+xyz_joint2_world;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 inertial_parameters_default = [change_Ic_coordinate([m1,xyz_com1_joint1,I1_com]),change_Ic_coordinate([m2,xyz_com2_joint2,I2_com]),change_Ic_coordinate([m3,xyz_com3_joint3,I3_com])];
 inertial_parameters_default = inertial_parameters_default';
-
 % m hx hy hz Ixx Ixy Ixz Iyy Iyz Izz
-num_points = size(q,2);
-tau_cal_list = zeros(3,num_points);
-pi_hat = sdpvar(30,1);
-e = 0;
-
-
-A = zeros(30,30);
-f = zeros(1,30);
-for i=1:num_points
-    % for each point use some skill to calculate Ym
-    Ym = zeros(3,30);
+tau_list_cal = zeros(3,num_points);
+for i =1:num_points
+   Ym = zeros(3,30);
     for j=1:30
         temp_inertial = zeros(30,1);
         temp_inertial(j) = 1;
-        Ym(:,j) = rnse(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
+        Ym(:,j) = rnea(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
     end
-    tau_cal_list(:,i) = Ym*inertial_parameters_default;
-    e = e+(Ym*pi_hat-torque(:,i))'*(Ym*pi_hat-torque(:,i));
-    A = A+Ym'*Ym/num_points;
-    f = f-2*torque(:,i)'*Ym/num_points;
+    tau_list_cal(:,i) = Ym*inertial_parameters_default;
+    %tau_list_cal(:,i) = rnea(q(:,i),qd(:,i),qdd(:,i),inertial_parameters_default);
 end
-e = e/num_points+0.2*(pi_hat-inertial_parameters_default)'*(pi_hat-inertial_parameters_default);
-A = A+0.2*eye(30);
-f = f-2*inertial_parameters_default';
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% use quadprog
-pi_ = quadprog(A*2,f');
-for i=1:num_points
-    % for each point use some skill to calculate Ym
-    Ym = zeros(3,30);
-    for j=1:30
-        temp_inertial = zeros(30,1);
-        temp_inertial(j) = 1;
-        Ym(:,j) = rnse(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
-    end
-    tau_cal_list(:,i) = Ym*pi_;
-end
-plot(t,torque(2,:))
-hold on
-plot(t,tau_cal_list(2,:))
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
-J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
-J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
-Constraints = [J1>=0,J2>=0,J3>=0];
-optimize([],e);
-pi_hat = value(pi_hat);
-for i=1:num_points
-    Ym = zeros(3,30);
-    for j=1:30
-        temp_inertial = zeros(30,1);
-        temp_inertial(j) = 1;
-        Ym(:,j) = rnse(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
-    end
-    tau_cal_list(:,i) = Ym*pi_hat;
-end
-plot(t,tau_cal_list(2,:));
-legend('real','use quadprog','use sdp')
+plot(t,tau_list_cal(2,:));
+hold on;
+plot(t,torque(2,:));
+legend('rnea','real')
 
-function tau = rnse(q_list,qd_list,qdd_list,inertial_parameters)
+
+
+function tau = rnea(q_list,qd_list,qdd_list,inertial_parameters)
 %{
 q_list = joint angle list
 qd_list = joint angle velocity list
@@ -156,26 +115,6 @@ function G = getG(inertial_parameters)
    G(4:6,1:3) = skew_h';
    G(1:3,4:6) = skew_h;
    G(4:6,4:6) = m*eye(3);
-end
-function J = cal_Pseudo_Inertial_Matrix(inertial_parameters)
-    m = inertial_parameters(1);% mass
-   hx = inertial_parameters(2);%mc
-   hy = inertial_parameters(3);
-   hz = inertial_parameters(4);
-   Ixx = inertial_parameters(5);%I
-   Ixy = inertial_parameters(6);
-   Ixz = inertial_parameters(7);
-   Iyy = inertial_parameters(8);
-   Iyz = inertial_parameters(9);
-   Izz = inertial_parameters(10); 
-   h = [hx;hy;hz];
-   I = [Ixx,Ixy,Ixz;Ixy,Iyy,Iyz;Ixz,Iyz,Izz];
-   Sigma = 0.5*trace(I)*eye(3,3)-I;
-   J = sdpvar(4,4);
-   J(1:3,1:3) = Sigma;
-   J(1:3,4) = h;
-   J(4,1:3) = h';
-   J(4,4) = m;
 end
 function inertial_joint = change_Ic_coordinate(inertial_parameters)
    m = inertial_parameters(1);% mass
