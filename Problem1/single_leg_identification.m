@@ -44,6 +44,8 @@ e = 0;
 
 A = zeros(30,30);
 f = zeros(1,30);
+Y_list = zeros(3*num_points,30);
+T_list = zeros(3*num_points,1);
 for i=1:num_points
     % for each point use some skill to calculate Ym
     Ym = zeros(3,30);
@@ -56,7 +58,10 @@ for i=1:num_points
     e = e+(Ym*pi_hat-torque(:,i))'*(Ym*pi_hat-torque(:,i));
     A = A+Ym'*Ym/num_points;
     f = f-2*torque(:,i)'*Ym/num_points;
+    Y_list(3*i-2:3*i,:) = Ym;
+    T_list(3*i-2:3*i) = torque(:,i);
 end
+
 e = e/num_points+0.2*(pi_hat-inertial_parameters_default)'*(pi_hat-inertial_parameters_default);
 A = A+2*eye(30);
 f = f-2*inertial_parameters_default';
@@ -96,7 +101,7 @@ try chol(J3)
 catch ME
     disp('J3 is not symmetric positive definite')
 end
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
 J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
 J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
@@ -119,7 +124,77 @@ for i=1:num_points
     tau_cal_list(:,i) = Ym*pi_hat;
 end
 plot(t,tau_cal_list(2,:));
-legend('real','use quadprog','use sdp')
+J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
+J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
+J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
+try chol(J1)
+    disp('J1 is symmetric positive definite.')
+catch ME
+    disp('J1 is not symmetric positive definite')
+end
+
+try chol(J2)
+    disp('J2 is symmetric positive definite.')
+catch ME
+    disp('J2 is not symmetric positive definite')
+end
+
+try chol(J3)
+    disp('J3 is symmetric positive definite.')
+catch ME
+    disp('J3 is not symmetric positive definite')
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+cvx_begin sdp
+    variable x(30) nonnegative
+    minimize(norm(Y_list*x-T_list,2)+0.1*norm(x-inertial_parameters_default,2))
+    expression J1(4,4) 
+    expression J2(4,4)
+    expression J3(4,4)
+    J1(1:3,1:3) = 1/2*(x(5)+x(8)+x(10))*eye(3)-[
+        x(5),x(6),x(7);
+        x(6),x(8),x(9);
+        x(7),x(9),x(10)
+    ];
+    J1(1:3,4) = [x(2);x(3);x(4)];
+    J1(4,1:3) = [x(2),x(3),x(4)];
+    J1(4,4) = x(1);
+    
+    J2(1:3,1:3) = 1/2*(x(15)+x(18)+x(20))*eye(3)-[
+        x(15),x(16),x(17);
+        x(16),x(18),x(19);
+        x(17),x(19),x(20)
+    ];
+    J2(1:3,4) = [x(12);x(13);x(14)];
+    J2(4,1:3) = [x(12),x(13),x(14)];
+    J2(4,4) = x(11);
+    
+    J3(1:3,1:3) = 1/2*(x(25)+x(28)+x(30))*eye(3)-[
+        x(25),x(26),x(27);
+        x(26),x(28),x(29);
+        x(27),x(29),x(30)
+    ];
+    J3(1:3,4) = [x(22);x(23);x(24)];
+    J3(4,1:3) = [x(22),x(23),x(24)];
+    J3(4,4) = x(21);
+    subject to:
+        J1>=eye(4)*1e-8;
+        J2>=eye(4)*1e-8;
+        J3>=eye(4)*1e-8;
+cvx_end
+
+for i=1:num_points
+    Ym = zeros(3,30);
+    for j=1:30
+        temp_inertial = zeros(30,1);
+        temp_inertial(j) = 1;
+        Ym(:,j) = rnse(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
+    end
+    tau_cal_list(:,i) = Ym*x;
+end
+plot(t,tau_cal_list(2,:));
+legend('real','use quadprog','use sdp','use sdp cvx')
 J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
 J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
 J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
@@ -144,6 +219,7 @@ end
 
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 function tau = rnse(q_list,qd_list,qdd_list,inertial_parameters)
 %{
 q_list = joint angle list
