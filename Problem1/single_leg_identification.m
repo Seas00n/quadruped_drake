@@ -198,7 +198,7 @@ legend('real','use quadprog','use sdp','use sdp cvx')
 J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
 J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
 J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
-try chol(J1)
+try chol(J1) % 如果调通J1,J2,J3全部是正定矩阵
     disp('J1 is symmetric positive definite.')
 catch ME
     disp('J1 is not symmetric positive definite')
