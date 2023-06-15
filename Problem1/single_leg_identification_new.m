@@ -78,9 +78,9 @@ for i=1:num_points
     end
     tau_cal_list(:,i) = Ym*pi_;
 end
-plot(t,torque(2,:))
+plot(t,torque(3,:))
 hold on
-plot(t,tau_cal_list(2,:))
+plot(t,tau_cal_list(3,:))
 J1 = cal_Pseudo_Inertial_Matrix(pi_(1:10));
 J2 = cal_Pseudo_Inertial_Matrix(pi_(11:20));
 J3 = cal_Pseudo_Inertial_Matrix(pi_(21:30));
@@ -102,53 +102,53 @@ catch ME
     disp('J3 is not symmetric positive definite')
 end
 % %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
-J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
-J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
-Constraints = [J1>=eye(4)*1e-8,J2>=eye(4)*1e-8,J3>=eye(4)*1e-8];
-sol = optimize([],e);
-if sol.problem == 0
- disp('x should have a value')
- value(pi_hat)
-else
- yalmiperror(sol.problem)
-end
-pi_hat = value(pi_hat);
-for i=1:num_points
-    Ym = zeros(3,30);
-    for j=1:30
-        temp_inertial = zeros(30,1);
-        temp_inertial(j) = 1;
-        Ym(:,j) = rnse(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
-    end
-    tau_cal_list(:,i) = Ym*pi_hat;
-end
-plot(t,tau_cal_list(2,:));
-J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
-J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
-J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
-try chol(J1)
-    disp('J1 is symmetric positive definite.')
-catch ME
-    disp('J1 is not symmetric positive definite')
-end
-
-try chol(J2)
-    disp('J2 is symmetric positive definite.')
-catch ME
-    disp('J2 is not symmetric positive definite')
-end
-
-try chol(J3)
-    disp('J3 is symmetric positive definite.')
-catch ME
-    disp('J3 is not symmetric positive definite')
-end
+% J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
+% J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
+% J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
+% Constraints = [J1>=eye(4)*1e-8,J2>=eye(4)*1e-8,J3>=eye(4)*1e-8];
+% sol = optimize([],e);
+% if sol.problem == 0
+%  disp('x should have a value')
+%  value(pi_hat)
+% else
+%  yalmiperror(sol.problem)
+% end
+% pi_hat = value(pi_hat);
+% for i=1:num_points
+%     Ym = zeros(3,30);
+%     for j=1:30
+%         temp_inertial = zeros(30,1);
+%         temp_inertial(j) = 1;
+%         Ym(:,j) = rnse(q(:,i),qd(:,i),qdd(:,i),temp_inertial);
+%     end
+%     tau_cal_list(:,i) = Ym*pi_hat;
+% end
+% plot(t,tau_cal_list(2,:));
+% J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
+% J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
+% J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
+% try chol(J1)
+%     disp('J1 is symmetric positive definite.')
+% catch ME
+%     disp('J1 is not symmetric positive definite')
+% end
+% 
+% try chol(J2)
+%     disp('J2 is symmetric positive definite.')
+% catch ME
+%     disp('J2 is not symmetric positive definite')
+% end
+% 
+% try chol(J3)
+%     disp('J3 is symmetric positive definite.')
+% catch ME
+%     disp('J3 is not symmetric positive definite')
+% end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 cvx_begin sdp
-    variable x(30) nonnegative
-    minimize(norm(Y_list*x-T_list,2)+0.1*norm(x-inertial_parameters_default,2))
+    variable x(30)
+    minimize(norm(Y_list*x-T_list,2)+0.05*norm(x-inertial_parameters_default,2))
     expression J1(4,4) 
     expression J2(4,4)
     expression J3(4,4)
@@ -193,12 +193,12 @@ for i=1:num_points
     end
     tau_cal_list(:,i) = Ym*x;
 end
-plot(t,tau_cal_list(2,:));
+plot(t,tau_cal_list(3,:));
 legend('real','use quadprog','use sdp','use sdp cvx')
-J1 = cal_Pseudo_Inertial_Matrix(pi_hat(1:10));
-J2 = cal_Pseudo_Inertial_Matrix(pi_hat(11:20));
-J3 = cal_Pseudo_Inertial_Matrix(pi_hat(21:30));
-try chol(J1) % 如果调通J1,J2,J3全部是正定矩阵
+J1 = cal_Pseudo_Inertial_Matrix(x(1:10));
+J2 = cal_Pseudo_Inertial_Matrix(x(11:20));
+J3 = cal_Pseudo_Inertial_Matrix(x(21:30));
+try chol(J1)
     disp('J1 is symmetric positive definite.')
 catch ME
     disp('J1 is not symmetric positive definite')

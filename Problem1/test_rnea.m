@@ -46,9 +46,9 @@ for i =1:num_points
     end
     tau_list_cal(:,i) = Ym*inertial_parameters_default;
 end
-plot(t,tau_list_cal(2,:));
+plot(t,tau_list_cal(3,:));
 hold on;
-plot(t,torque(2,:));
+plot(t,torque(3,:));
 legend('rnea','real')
 
 
