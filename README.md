@@ -87,3 +87,5 @@ control_method = "MPTC"
 sim_time = 3.5
 ```
 运行即可
+
+注意：numpy<=1.23.1
