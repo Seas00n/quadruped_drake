@@ -34,11 +34,23 @@ Run the simulation script `./simulate.py`.
 
 ## 关于环境配置
 
-从源代码安装Drake
+从源代码安装DrakeVisualizer
 
 1.从源代码安装，参考
 ```angular2html
 git clone https://github.com/RobotLocomotion/drake.git
+```
+pydrake安装
+```angular2html
+cd ~
+curl -fsSLO https://github.com/RobotLocomotion/drake/releases/download/v1.24.0/drake-1.24.0-focal.tar.gz
+tar -xvzf drake.tar.gz
+cd drake
+env/share/drake/setup/install_prereqs
+```
+配置`.bashrc`
+```
+export PYTHONPATH=/home/seas00n/drake/lib/python3.8/site-packages:${PYTHONPATH}
 ```
 2.运行环境配置
 ```angular2html
